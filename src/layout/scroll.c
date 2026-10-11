@@ -808,6 +808,8 @@ void scroller_insert_stack(Client *c, Client *target_client,
 	if (!target_client || target_client->mon != c->mon)
 		return;
 
+	/* Stacking explicitly clears both fullscreen and maximization. */
+	c->fullscreen_was_maximized = false;
 	if (c->isfullscreen)
 		client_apply_fullscreen(c, 0, true);
 	if (c->ismaximizescreen)
@@ -848,6 +850,7 @@ void scroller_insert_stack(Client *c, Client *target_client,
 	while (head->prev_in_stack)
 		head = head->prev_in_stack;
 	Client *stack_head = head->client;
+	stack_head->fullscreen_was_maximized = false;
 	if (stack_head->ismaximizescreen)
 		client_set_maximize_screen(stack_head, 0, true);
 	if (stack_head->isfullscreen)

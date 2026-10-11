@@ -129,6 +129,7 @@ struct Client {
 		ignore_maximize, ignore_minimize, idleinhibit_when_focus,
 		vrr_only_fullscreen, force_render, activation_bypass;
 	int32_t ismaximizescreen;
+	bool fullscreen_was_maximized; /* Restore on normal fullscreen exit. */
 	int32_t overview_backup_bw;
 	int32_t fullscreen_backup_x, fullscreen_backup_y, fullscreen_backup_w,
 		fullscreen_backup_h;

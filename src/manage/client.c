@@ -2038,6 +2038,7 @@ void init_client_properties(Client *c) {
 	c->old_ismaster = 0;
 	c->isleftstack = 0;
 	c->ismaximizescreen = 0;
+	c->fullscreen_was_maximized = false;
 	c->isfullscreen = 0;
 	c->need_float_size_reduce = 0;
 	c->iskilling = 0;
@@ -2585,6 +2586,8 @@ void handle_client_unmap(struct wl_listener *listener, void *data) {
 	if (c->swallowing) {
 		client_set_maximize_screen(c->swallowing, c->ismaximizescreen, true);
 		client_apply_fullscreen(c->swallowing, c->isfullscreen, true);
+		/* State transfer, not an explicit maximize/unmaximize request. */
+		c->swallowing->fullscreen_was_maximized = c->fullscreen_was_maximized;
 		c->swallowing->swallowdby = NULL;
 		c->swallowing = NULL;
 	}
@@ -3165,9 +3168,13 @@ void client_set_monitor(Client *c, Monitor *m, uint32_t newtags, bool focus) {
 		resize(c, c->geom, (ResizeOpts){.interact = 0});
 		client_reset_mon_tags(c, m, newtags);
 		check_match_tag_floating_rule(c, m);
+		/* Reapplying state on another monitor is not a floating toggle. */
+		int32_t fullscreen = c->isfullscreen;
+		bool fullscreen_was_maximized = c->fullscreen_was_maximized;
 		client_set_floating(c, c->isfloating);
-		client_apply_fullscreen(c, c->isfullscreen,
+		client_apply_fullscreen(c, fullscreen,
 								true); /* This will call arrange(c->mon) */
+		c->fullscreen_was_maximized = fullscreen_was_maximized;
 	}
 
 	if (focus && !client_is_x11_popup(c)) {
@@ -3235,6 +3242,9 @@ void client_set_floating(Client *c, int32_t floating) {
 
 	if (!c || !c->mon || !client_surface(c)->mapped || c->iskilling)
 		return;
+
+	/* An explicit floating/tiling change overrides fullscreen restoration. */
+	c->fullscreen_was_maximized = false;
 
 	target_box = c->geom;
 
@@ -3326,6 +3336,15 @@ void client_apply_fullscreen(
 	if (c->mon->isoverview)
 		return;
 
+	bool restore_maximized = !fullscreen && c->isfullscreen &&
+							 c->fullscreen_was_maximized;
+	/* Repeated fullscreen requests and overview restoration must not
+	 * overwrite the state saved on the initial transition. */
+	if (fullscreen && !c->isfullscreen)
+		c->fullscreen_was_maximized = c->ismaximizescreen;
+	else if (!fullscreen)
+		c->fullscreen_was_maximized = false;
+
 	c->isfullscreen = fullscreen;
 
 	client_set_fullscreen(c, fullscreen);
@@ -3348,7 +3367,9 @@ void client_apply_fullscreen(
 
 	} else {
 		c->bw = c->no_border ? 0 : config.borderpx;
-		if (c->isfloating)
+		if (restore_maximized)
+			client_set_maximize_screen(c, 1, false);
+		else if (c->isfloating && !c->ismaximizescreen)
 			client_set_floating(c, 1);
 	}
 
@@ -3391,6 +3412,9 @@ void client_set_maximize_screen(Client *c, int32_t maximizescreen,
 
 	if (c->mon->isoverview)
 		return;
+
+	/* An explicit maximize/unmaximize request overrides the saved state. */
+	c->fullscreen_was_maximized = false;
 
 	client_pending_maximized_state(c, maximizescreen);
 
@@ -3542,6 +3566,9 @@ void clear_fullscreen_flag(Client *c) {
 		return;
 	}
 
+	/* This path intentionally clears both fullscreen and maximization. */
+	c->fullscreen_was_maximized = false;
+
 	if (c->isfullscreen) {
 		client_apply_fullscreen(c, false, true);
 	}
@@ -3574,6 +3601,8 @@ void client_pending_minimized_state(Client *c, int32_t isminimized) {
 }
 
 void show_scratchpad(Client *c) {
+	c->fullscreen_was_maximized = false;
+
 	if (c->isfullscreen || c->ismaximizescreen) {
 		client_pending_fullscreen_state(c, 0);
 		client_pending_maximized_state(c, 0);
@@ -3835,6 +3864,7 @@ void client_replace(Client *c, Client *w, bool is_group_change_member,
 													c->mon->wlr_output);
 	}
 
+	c->fullscreen_was_maximized = w->fullscreen_was_maximized;
 	client_pending_fullscreen_state(c, w->isfullscreen);
 	client_pending_maximized_state(c, w->ismaximizescreen);
 	client_pending_minimized_state(c, w->isminimized);
